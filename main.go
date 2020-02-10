@@ -4,6 +4,8 @@
 
 // goissues exports issues from the golang/go project (via the Maintner mirror
 // service) to CSV for analysis.
+//
+// Forked from github.com/bcmills/goissues.
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"encoding/csv"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -23,36 +26,11 @@ import (
 // Extract using:
 // 	curl -sn https://api.github.com/repos/golang/go/labels/$LABELNAME | jq .id
 const (
-	go2ID                = 150880249
-	documentationID      = 150880209
-	earlyInCycleID       = 626114143
-	featureRequestID     = 373540105
-	helpWantedID         = 150880243
-	needsDecisionID      = 373401956
-	needsFixID           = 373399998
-	needsInvestigationID = 373402289
-	performanceID        = 150880191
-	proposalID           = 236419512
-	proposalHoldID       = 477156222
-	releaseBlockerID     = 626114820
-	soonID               = 936464699
-	testingID            = 150880205
-	toolSpeedID          = 358732225
-	waitingForInfoID     = 357033853
-	frozenDueToAgeID     = 398069301
-)
-
-// GitHub Milestone numbers for the golang/go repo.
-//
-// Extract using:
-// 	curl -sn https://api.github.com/repos/golang/go/milestones | jq ".[] | select(.title == \"$MILESTONE\") | .id"
-const (
-	unplannedMilestone  = 6
-	unreleasedMilestone = 22
-	proposalMilestone   = 30
-	go2Milestone        = 72
-	gccgoMilestone      = 23
-	gollvmMilestone     = 100
+	proposalID       = 236419512
+	proposalHoldID   = 477156222
+	needsDecisionID  = 373401956
+	frozenDueToAgeID = 398069301
+	waitingForInfoID = 357033853
 )
 
 func main() {
@@ -108,7 +86,10 @@ func main() {
 
 	w := csv.NewWriter(os.Stdout)
 
+	var who, labels []string
 	err = repo.ForeachIssue(func(i *maintner.GitHubIssue) error {
+		who = who[:0]
+		labels = labels[:0]
 		if i.NotExist || i.PullRequest || (i.Locked && i.HasLabelID(frozenDueToAgeID)) {
 			return nil
 		}
@@ -124,26 +105,9 @@ func main() {
 			state = "locked"
 		}
 
-		when := ""
+		milestone := ""
 		if i.Milestone != nil {
-			switch i.Milestone.Number {
-			case unplannedMilestone:
-				if i.HasLabelID(helpWantedID) {
-					when = "help"
-				} else {
-					when = "unplanned"
-				}
-			case unreleasedMilestone:
-				when = "unreleased"
-			case proposalMilestone:
-				when = "proposal"
-			case go2Milestone:
-				when = "go2"
-			case gccgoMilestone:
-				when = "gccgo"
-			case gollvmMilestone:
-				when = "gollvm"
-			}
+			milestone = i.Milestone.Title
 		}
 
 		for _, l := range i.Labels {
@@ -158,45 +122,11 @@ func main() {
 				case "":
 					state = "deciding"
 				}
-
-			case soonID:
-				when = "soon"
-			case releaseBlockerID:
-				switch when {
-				case "", "early", "feature", "performance", "test", "doc":
-					if i.Milestone != nil {
-						when = i.Milestone.Title
-					} else {
-						when = "release"
-					}
-				}
-			case earlyInCycleID:
-				switch when {
-				case "", "feature", "performance", "test", "doc":
-					when = "early"
-				}
-			case featureRequestID:
-				switch when {
-				case "", "performance", "test", "doc":
-					when = "feature"
-				}
-			case performanceID, toolSpeedID:
-				switch when {
-				case "", "test", "doc":
-					when = "performance"
-				}
-			case testingID:
-				switch when {
-				case "", "doc":
-					when = "test"
-				}
-			case documentationID:
-				switch when {
-				case "":
-					when = "doc"
-				}
+			default:
+				labels = append(labels, strings.ToLower(l.Name))
 			}
 		}
+		sort.Strings(labels)
 
 		if state == "" {
 			if issueHasCL[i.Number] {
@@ -206,18 +136,15 @@ func main() {
 			}
 		}
 
-		var who strings.Builder
 		for _, a := range i.Assignees {
 			if a.Login == "" {
 				continue
 			}
-			if who.Len() > 0 {
-				who.WriteString(",")
-			}
-			who.WriteString(a.Login)
+			who = append(who, a.Login)
 		}
+		sort.Strings(who)
 
-		return w.Write([]string{number, updated, state, when, who.String(), i.Title})
+		return w.Write([]string{number, updated, state, milestone, strings.Join(labels, ","), strings.Join(who, ","), i.Title})
 	})
 	if err != nil {
 		log.Fatal(err)

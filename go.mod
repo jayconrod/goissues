@@ -1,4 +1,4 @@
-module github.com/bcmills/goissues
+module github.com/jayconrod/goissues
 
 go 1.13
 
